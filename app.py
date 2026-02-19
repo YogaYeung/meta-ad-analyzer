@@ -11,15 +11,7 @@ import pandas as pd
 import json
 import time
 import io
-import os
-import tempfile
 from pathlib import Path
-
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
 
 # ═══════════════════════════════════════════════════════
 # 页面配置
@@ -167,38 +159,28 @@ def analyze_single_ad(client, model_name: str, ad_id: str,
     """调用Gemini分析一条广告素材"""
     prompt = SINGLE_AD_PROMPT.format(ad_id=ad_id)
     content_parts = [prompt]
-    tmp_path = None
+
+    if file_bytes and file_ext:
+        ext = file_ext.lower()
+
+        if ext in {'.jpg', '.jpeg', '.png', '.gif', '.webp'}:
+            mime_map = {
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp'
+            }
+            content_parts.append(
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_map[ext])
+            )
+
+        elif ext in {'.mp4', '.mov', '.avi', '.webm'}:
+            if len(file_bytes) > 20 * 1024 * 1024:
+                st.warning(f"⚠️ {ad_id} 视频文件超过20MB，建议压缩后重新上传")
+            else:
+                content_parts.append(
+                    types.Part.from_bytes(data=file_bytes, mime_type="video/mp4")
+                )
 
     try:
-        if file_bytes and file_ext:
-            ext = file_ext.lower()
-
-            # 图片：直接传 PIL Image
-            if ext in {'.jpg', '.jpeg', '.png', '.gif', '.webp'}:
-                if PIL_AVAILABLE:
-                    img = Image.open(io.BytesIO(file_bytes))
-                    content_parts.append(img)
-
-            # 视频：通过 Files API 上传
-            elif ext in {'.mp4', '.mov', '.avi', '.webm'}:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-                    tmp.write(file_bytes)
-                    tmp_path = tmp.name
-                try:
-                    vf = client.files.upload(path=tmp_path)
-                    # 等待处理完成（最多60秒）
-                    for _ in range(20):
-                        if vf.state.name != "PROCESSING":
-                            break
-                        time.sleep(3)
-                        vf = client.files.get(name=vf.name)
-                    if vf.state.name == "ACTIVE":
-                        content_parts.append(vf)
-                    else:
-                        st.warning("⚠️ 视频处理超时，将仅分析画面截图")
-                except Exception as ve:
-                    st.warning(f"⚠️ 视频上传遇到问题（{str(ve)[:80]}）")
-
         resp = client.models.generate_content(
             model=model_name,
             contents=content_parts
@@ -217,10 +199,6 @@ def analyze_single_ad(client, model_name: str, ad_id: str,
         row["素材编号"] = ad_id
         row["核心信息主张"] = str(e)[:200]
         return row
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
 
 
 def build_excel(df: pd.DataFrame, summary: str) -> bytes:

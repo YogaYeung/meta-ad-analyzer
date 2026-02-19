@@ -5,7 +5,8 @@ META广告竞品拆解分析工具
 """
 
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import pandas as pd
 import json
 import time
@@ -161,14 +162,10 @@ def parse_json_response(text: str) -> dict:
     return json.loads(text)
 
 
-def analyze_single_ad(model, ad_id: str, ad_copy: str,
+def analyze_single_ad(client, model_name: str, ad_id: str,
                       file_bytes: bytes = None, file_ext: str = None) -> dict:
     """调用Gemini分析一条广告素材"""
-    prompt = SINGLE_AD_PROMPT.format(
-        ad_id=ad_id,
-        ad_copy=ad_copy.strip() if ad_copy else "（未提供文案，请根据素材画面内容分析）"
-    )
-
+    prompt = SINGLE_AD_PROMPT.format(ad_id=ad_id)
     content_parts = [prompt]
     tmp_path = None
 
@@ -184,34 +181,35 @@ def analyze_single_ad(model, ad_id: str, ad_copy: str,
 
             # 视频：通过 Files API 上传
             elif ext in {'.mp4', '.mov', '.avi', '.webm'}:
-                mime = "video/mp4"
                 with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                     tmp.write(file_bytes)
                     tmp_path = tmp.name
                 try:
-                    vf = genai.upload_file(tmp_path, mime_type=mime)
+                    vf = client.files.upload(path=tmp_path)
                     # 等待处理完成（最多60秒）
                     for _ in range(20):
                         if vf.state.name != "PROCESSING":
                             break
                         time.sleep(3)
-                        vf = genai.get_file(vf.name)
+                        vf = client.files.get(name=vf.name)
                     if vf.state.name == "ACTIVE":
                         content_parts.append(vf)
                     else:
-                        st.warning(f"⚠️ 视频处理超时，将仅分析文案内容")
+                        st.warning("⚠️ 视频处理超时，将仅分析画面截图")
                 except Exception as ve:
-                    st.warning(f"⚠️ 视频上传遇到问题（{str(ve)[:80]}），将仅分析文案内容")
+                    st.warning(f"⚠️ 视频上传遇到问题（{str(ve)[:80]}）")
 
-        resp = model.generate_content(content_parts)
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=content_parts
+        )
         return parse_json_response(resp.text)
 
     except json.JSONDecodeError:
         raw = resp.text if 'resp' in locals() else "无响应"
-        # 解析失败时返回带错误信息的空行
         row = {col: "解析失败" for col in COLUMNS}
         row["素材编号"] = ad_id
-        row["核心信息主张"] = f"JSON解析失败，原始响应前200字：{raw[:200]}"
+        row["核心信息主张"] = f"JSON解析失败：{raw[:200]}"
         return row
 
     except Exception as e:
@@ -319,13 +317,13 @@ def main():
 
         brand_name = st.text_input(
             "我的品牌名称",
-            placeholder="例：Dinkly",
+            placeholder="填你自己的品牌名",
             help="你自己的品牌名，用于生成「针对XX品牌的落地建议」"
         )
 
         competitor_name = st.text_input(
             "被分析的竞品品牌",
-            placeholder="例：Selkirk / JOOLA",
+            placeholder="填你上传素材所属的竞品品牌名",
             help="你上传的素材来自哪个竞品品牌？"
         )
 
@@ -333,9 +331,9 @@ def main():
             "我的产品介绍",
             height=90,
             placeholder=(
-                "例：匹克球拍，15mm厚度，EPP发泡芯\n"
-                "主打进阶玩家，售价 $89\n"
-                "核心功效：旋转强、减震好、控制精准"
+                "填写你的产品类型、核心功效/特性、\n"
+                "主要材质/成分、售价区间等\n"
+                "（越具体，建议越精准）"
             ),
             help="产品类型、核心卖点、价位段、主要功效/特性"
         )
@@ -344,20 +342,20 @@ def main():
             "我的目标人群",
             height=90,
             placeholder=(
-                "例：3.0-3.5 进阶玩家（主力）\n"
-                "25-45岁，男性为主\n"
-                "痛点：器材跟不上技术成长，不想花冤枉钱"
+                "填写你的核心目标用户：\n"
+                "年龄段、性别、生活状态\n"
+                "他们最大的痛点或需求是什么？"
             ),
-            help="年龄、性别、技术水平/生活状态、核心痛点"
+            help="年龄、性别、生活状态、核心痛点"
         )
 
         brand_usp = st.text_area(
             "我的核心差异化卖点",
             height=90,
             placeholder=(
-                "例：Dinkly 专为认真对待匹克球的人而生\n"
-                "不被器材反噬、不为参数付溢价\n"
-                "性价比最高的专业级选择"
+                "你跟竞品最大的不同是什么？\n"
+                "为什么用户应该选你而不是竞品？\n"
+                "你最想让用户记住的一句话是？"
             ),
             help="你跟竞品最大的不同是什么？为什么用户选你不选竞品？"
         )
@@ -442,8 +440,7 @@ def main():
         # 执行分析
         # ══════════════════════════════════════
         if go and api_key:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name)
+            client = genai.Client(api_key=api_key)
 
             results = []
             progress_bar = st.progress(0, "准备开始分析...")
@@ -459,7 +456,7 @@ def main():
                 file_bytes = f.read()
                 ext = Path(f.name).suffix.lower()
 
-                result = analyze_single_ad(model, ad_id, "", file_bytes, ext)
+                result = analyze_single_ad(client, model_name, ad_id, file_bytes, ext)
                 result["_filename"] = f.name
                 results.append(result)
 
@@ -503,7 +500,10 @@ def main():
                 )
 
                 try:
-                    summary_resp = model.generate_content(sp)
+                    summary_resp = client.models.generate_content(
+                        model=model_name,
+                        contents=sp
+                    )
                     summary_text = summary_resp.text
                     st.markdown(summary_text)
                 except Exception as e:

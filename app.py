@@ -140,7 +140,6 @@ COLUMNS = [
 def parse_json_response(text: str) -> dict:
     """从Gemini响应中稳健地提取JSON"""
     text = text.strip()
-    # 去掉 markdown 代码块
     for marker in ["```json", "```JSON", "```"]:
         if marker in text:
             parts = text.split(marker)
@@ -150,7 +149,6 @@ def parse_json_response(text: str) -> dict:
                     return json.loads(candidate)
                 except Exception:
                     continue
-    # 直接尝试解析
     return json.loads(text)
 
 
@@ -209,11 +207,9 @@ def build_excel(df: pd.DataFrame, summary: str) -> bytes:
 
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
 
-        # Sheet 1：素材分析明细
         df.to_excel(writer, sheet_name='素材分析明细', index=False)
         ws = writer.sheets['素材分析明细']
 
-        # 表头样式
         hfill = PatternFill("solid", fgColor="1F4E79")
         hfont = Font(color="FFFFFF", bold=True, size=11)
         for cell in ws[1]:
@@ -222,13 +218,11 @@ def build_excel(df: pd.DataFrame, summary: str) -> bytes:
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         ws.row_dimensions[1].height = 32
 
-        # 数据行样式
         for row in ws.iter_rows(min_row=2):
             ws.row_dimensions[row[0].row].height = 72
             for cell in row:
                 cell.alignment = Alignment(wrap_text=True, vertical='top')
 
-        # 列宽
         col_widths = {
             "素材编号": 10, "素材类型": 10, "素材形式": 16,
             "广告感判断": 14, "素材时长": 10, "是否前三秒出现产品": 18,
@@ -242,7 +236,6 @@ def build_excel(df: pd.DataFrame, summary: str) -> bytes:
             letter = ws.cell(1, i).column_letter
             ws.column_dimensions[letter].width = col_widths.get(col_name, 20)
 
-        # Sheet 2：综合策略报告
         ws2 = writer.book.create_sheet("综合策略报告")
         ws2.column_dimensions['A'].width = 120
         ws2['A1'] = summary
@@ -259,7 +252,6 @@ def build_excel(df: pd.DataFrame, summary: str) -> bytes:
 
 def main():
 
-    # ── 顶部标题 ──
     st.title("🎯 META广告竞品拆解分析工具")
     st.markdown(
         "**专为跨境独立站运营者设计** · 上传竞品广告素材 → AI深度拆解20个维度 → "
@@ -267,9 +259,6 @@ def main():
     )
     st.divider()
 
-    # ══════════════════════════════════════
-    # 侧边栏：API配置 + 品牌信息
-    # ══════════════════════════════════════
     with st.sidebar:
         st.header("⚙️ API 配置")
 
@@ -284,8 +273,8 @@ def main():
 
         model_name = st.selectbox(
             "分析模型",
-            ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-pro-preview-03-25"],
-            help="2.0 Flash：速度快成本低，推荐日常使用\n2.5 Pro：分析最深入，适合重要竞品研究"
+            ["gemini-3-flash-preview", "gemini-3-pro-preview"],
+            help="推荐使用 gemini-3-flash-preview，速度快、质量稳定；gemini-3-pro-preview 分析更深入但较慢"
         )
 
         st.divider()
@@ -341,9 +330,6 @@ def main():
         st.divider()
         st.caption("🔒 API Key 仅在你的浏览器本地使用，不会被保存或传输到任何第三方")
 
-    # ══════════════════════════════════════
-    # 主区域：使用说明
-    # ══════════════════════════════════════
     with st.expander("📖 使用步骤（点击展开）", expanded=False):
         st.markdown("""
 **Step 1** → 在左侧填写你的 **Gemini API Key**（[免费获取](https://aistudio.google.com)）
@@ -366,9 +352,6 @@ def main():
 建议每批 **5-15条** 素材，超过 20 条建议分批上传
         """)
 
-    # ══════════════════════════════════════
-    # 素材上传
-    # ══════════════════════════════════════
     st.header("📤 上传竞品广告素材")
 
     uploaded = st.file_uploader(
@@ -381,7 +364,6 @@ def main():
         st.subheader(f"✅ 已上传 {len(uploaded)} 个素材，预览如下")
         st.caption("AI 将直接分析素材的视觉内容，无需填写文案。")
 
-        # 每行3列的预览网格
         cols_per_row = 3
         for i in range(0, len(uploaded), cols_per_row):
             cols = st.columns(cols_per_row)
@@ -401,7 +383,6 @@ def main():
 
         st.divider()
 
-        # ── 分析按钮 ──
         if not api_key:
             st.warning("⚠️ 请先在左侧输入 Gemini API Key 才能开始分析")
 
@@ -414,9 +395,6 @@ def main():
                 use_container_width=True
             )
 
-        # ══════════════════════════════════════
-        # 执行分析
-        # ══════════════════════════════════════
         if go and api_key:
             client = genai.Client(api_key=api_key)
 
@@ -429,7 +407,6 @@ def main():
                 status_msg.info(f"🔍 正在分析 **{ad_id}**：{f.name}  （{i+1} / {len(uploaded)}）")
                 progress_bar.progress(i / len(uploaded))
 
-                # 重置文件指针再读取（避免preview已读过）
                 f.seek(0)
                 file_bytes = f.read()
                 ext = Path(f.name).suffix.lower()
@@ -438,12 +415,11 @@ def main():
                 result["_filename"] = f.name
                 results.append(result)
 
-                time.sleep(0.8)  # 避免触发API速率限制
+                time.sleep(0.8)
 
             progress_bar.progress(1.0)
             status_msg.success(f"✅ {len(results)} 条素材全部分析完成！")
 
-            # ── 显示明细表格 ──
             st.header("📊 分析结果明细")
 
             rows = []
@@ -454,11 +430,9 @@ def main():
 
             st.dataframe(df, use_container_width=True, height=420)
 
-            # ── 生成综合策略报告 ──
             st.header("💡 综合策略报告")
 
             with st.spinner("🧠 AI正在生成竞品洞察和品牌落地建议，请稍候（约30-60秒）..."):
-                # 准备送给AI的分析结果（去掉内部字段，控制长度）
                 clean_results = [
                     {k: v for k, v in r.items() if not k.startswith("_")}
                     for r in results
@@ -488,7 +462,6 @@ def main():
                     summary_text = f"综合报告生成遇到问题：{e}"
                     st.error(summary_text)
 
-            # ── 导出Excel ──
             st.divider()
             st.header("📥 导出完整报告")
 
@@ -508,7 +481,6 @@ def main():
             st.success("🎉 分析完成！Excel报告包含两个Sheet：「素材分析明细」和「综合策略报告」")
 
     else:
-        # 空状态引导
         st.info("👆 点击上方「Browse files」上传从 Meta 广告素材库下载的竞品广告素材")
 
         with st.expander("👀 示例输出效果预览"):

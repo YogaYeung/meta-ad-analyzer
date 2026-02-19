@@ -35,10 +35,7 @@ st.set_page_config(
 # ═══════════════════════════════════════════════════════
 SINGLE_AD_PROMPT = """你是一名专业的Meta广告创意策略分析师，专注于跨境电商DTC品牌广告研究。
 
-请深度分析这个广告素材，严格按JSON格式输出，所有字段必须填写，不确定的填"无法判断"。
-
-广告文案内容：
-{ad_copy}
+请深度分析这个广告素材的视觉内容（画面、文字、音频、节奏、风格等所有可见信息），严格按JSON格式输出，所有字段必须填写，不确定的填"无法判断"。
 
 只输出JSON，不要任何其他文字：
 {{
@@ -311,31 +308,58 @@ def main():
 
         model_name = st.selectbox(
             "分析模型",
-            ["gemini-1.5-flash", "gemini-1.5-pro"],
-            help="Flash：速度快、成本低（推荐日常使用）\nPro：分析更深入，适合重要项目"
+            ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-pro-preview-03-25"],
+            help="2.0 Flash：速度快成本低，推荐日常使用\n2.5 Pro：分析最深入，适合重要竞品研究"
         )
 
         st.divider()
 
         st.header("🏷️ 我的品牌信息")
-        st.caption("填写越详细，落地建议越精准")
+        st.caption("填写越详细，AI给出的落地建议越精准。可不填，但会影响报告质量。")
 
-        brand_name = st.text_input("品牌名称", placeholder="例：GlowSkin")
-        competitor_name = st.text_input("竞品品牌", placeholder="例：SkinCeuticals")
+        brand_name = st.text_input(
+            "我的品牌名称",
+            placeholder="例：Dinkly",
+            help="你自己的品牌名，用于生成「针对XX品牌的落地建议」"
+        )
+
+        competitor_name = st.text_input(
+            "被分析的竞品品牌",
+            placeholder="例：Selkirk / JOOLA",
+            help="你上传的素材来自哪个竞品品牌？"
+        )
+
         brand_product = st.text_area(
-            "产品介绍",
-            height=80,
-            placeholder="产品类型、主要功效、核心成分、价位段..."
+            "我的产品介绍",
+            height=90,
+            placeholder=(
+                "例：匹克球拍，15mm厚度，EPP发泡芯\n"
+                "主打进阶玩家，售价 $89\n"
+                "核心功效：旋转强、减震好、控制精准"
+            ),
+            help="产品类型、核心卖点、价位段、主要功效/特性"
         )
+
         brand_persona = st.text_area(
-            "目标人群",
-            height=80,
-            placeholder="年龄段、性别、核心痛点、消费习惯..."
+            "我的目标人群",
+            height=90,
+            placeholder=(
+                "例：3.0-3.5 进阶玩家（主力）\n"
+                "25-45岁，男性为主\n"
+                "痛点：器材跟不上技术成长，不想花冤枉钱"
+            ),
+            help="年龄、性别、技术水平/生活状态、核心痛点"
         )
+
         brand_usp = st.text_area(
-            "核心差异化卖点",
-            height=80,
-            placeholder="我们最大的竞争优势是什么？"
+            "我的核心差异化卖点",
+            height=90,
+            placeholder=(
+                "例：Dinkly 专为认真对待匹克球的人而生\n"
+                "不被器材反噬、不为参数付溢价\n"
+                "性价比最高的专业级选择"
+            ),
+            help="你跟竞品最大的不同是什么？为什么用户选你不选竞品？"
         )
 
         st.divider()
@@ -346,22 +370,24 @@ def main():
     # ══════════════════════════════════════
     with st.expander("📖 使用步骤（点击展开）", expanded=False):
         st.markdown("""
-**Step 1** → 打开 [Meta广告素材库](https://www.facebook.com/ads/library/)，搜索目标竞品品牌
+**Step 1** → 在左侧填写你的 **Gemini API Key**（[免费获取](https://aistudio.google.com)）
 
-**Step 2** → 下载广告素材（图片右键保存，视频用录屏或下载工具保存为MP4）
+**Step 2** → 在左侧填写你的**品牌信息**（品牌名、产品、人群、卖点）
 
-**Step 3** → 复制每条广告的完整文案（标题 + 正文 + 链接描述）
+**Step 3** → 打开 [Meta广告素材库](https://www.facebook.com/ads/library/)，找到竞品品牌，下载广告素材
+- 图片：右键保存
+- 视频：用录屏工具或下载插件保存为 MP4
 
-**Step 4** → 在左侧填写 Gemini API Key + 你的品牌信息
+**Step 4** → 点击「Browse files」**批量上传**素材
 
-**Step 5** → 上传素材，粘贴文案，点击「开始分析」
+**Step 5** → 点击「开始分析」，等待 AI 自动拆解（每条约 10-20 秒）
 
-**Step 6** → 查看AI分析报告，一键下载Excel
+**Step 6** → 查看分析表格和综合策略报告，**一键下载 Excel**
 
 ---
 支持格式：图片（JPG、PNG、GIF）· 视频（MP4、MOV）
 
-建议每批 **5-15条** 素材，超过20条建议分批分析
+建议每批 **5-15条** 素材，超过 20 条建议分批上传
         """)
 
     # ══════════════════════════════════════
@@ -375,49 +401,29 @@ def main():
         accept_multiple_files=True
     )
 
-    # ══════════════════════════════════════
-    # 每个素材的文案输入区
-    # ══════════════════════════════════════
-    copies = {}
-
     if uploaded:
-        st.subheader(f"✏️ 填写对应广告文案（已上传 {len(uploaded)} 个素材）")
-        st.caption(
-            "从Ads Library复制每条广告的完整文案粘贴到对应位置。"
-            "不填也可直接分析，但填了文案准确度会明显更高。"
-        )
+        st.subheader(f"✅ 已上传 {len(uploaded)} 个素材，预览如下")
+        st.caption("AI 将直接分析素材的视觉内容，无需填写文案。")
 
-        for i, f in enumerate(uploaded):
-            ext = Path(f.name).suffix.lower()
+        # 每行3列的预览网格
+        cols_per_row = 3
+        for i in range(0, len(uploaded), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j, col in enumerate(cols):
+                idx = i + j
+                if idx < len(uploaded):
+                    f = uploaded[idx]
+                    ext = Path(f.name).suffix.lower()
+                    with col:
+                        f.seek(0)
+                        if ext in {'.jpg', '.jpeg', '.png', '.gif'}:
+                            st.image(f, caption=f"AD-{str(idx+1).zfill(3)}",
+                                     use_container_width=True)
+                        else:
+                            st.video(f)
+                            st.caption(f"AD-{str(idx+1).zfill(3)}: {f.name}")
 
-            col_left, col_right = st.columns([1, 2])
-
-            with col_left:
-                # 预览
-                f.seek(0)
-                if ext in {'.jpg', '.jpeg', '.png', '.gif'}:
-                    st.image(f, caption=f"AD-{str(i+1).zfill(3)}: {f.name}",
-                             use_container_width=True)
-                else:
-                    st.video(f)
-                    st.caption(f"AD-{str(i+1).zfill(3)}: {f.name}")
-
-            with col_right:
-                copies[f.name] = st.text_area(
-                    f"AD-{str(i+1).zfill(3)} 广告文案",
-                    height=160,
-                    key=f"copy_{i}",
-                    placeholder=(
-                        "粘贴广告标题 + 正文 + 链接描述...\n\n"
-                        "示例：\n"
-                        "Stop wasting money on skincare that doesn't work.\n"
-                        "Our clinically-proven serum delivers visible results in 30 days "
-                        "or your money back. Join 50,000+ happy customers.\n"
-                        "Shop Now →"
-                    )
-                )
-
-            st.divider()
+        st.divider()
 
         # ── 分析按钮 ──
         if not api_key:
@@ -452,9 +458,8 @@ def main():
                 f.seek(0)
                 file_bytes = f.read()
                 ext = Path(f.name).suffix.lower()
-                copy = copies.get(f.name, "")
 
-                result = analyze_single_ad(model, ad_id, copy, file_bytes, ext)
+                result = analyze_single_ad(model, ad_id, "", file_bytes, ext)
                 result["_filename"] = f.name
                 results.append(result)
 
